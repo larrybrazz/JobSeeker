@@ -1,0 +1,1721 @@
+/******/ (function() { // webpackBootstrap
+/******/ 	var __webpack_modules__ = ({
+
+/***/ 55161:
+/***/ (function(module) {
+
+(function (global, factory) {
+	 true ? module.exports = factory() :
+	0;
+}(this, (function () { 'use strict';
+
+var isarray = Array.isArray || function (arr) {
+  return Object.prototype.toString.call(arr) == '[object Array]';
+};
+
+/**
+ * Expose `pathToRegexp`.
+ */
+var pathToRegexp_1 = pathToRegexp;
+var parse_1 = parse;
+var compile_1 = compile;
+var tokensToFunction_1 = tokensToFunction;
+var tokensToRegExp_1 = tokensToRegExp;
+
+/**
+ * The main path matching regexp utility.
+ *
+ * @type {RegExp}
+ */
+var PATH_REGEXP = new RegExp([
+  // Match escaped characters that would otherwise appear in future matches.
+  // This allows the user to escape special characters that won't transform.
+  '(\\\\.)',
+  // Match Express-style parameters and un-named parameters with a prefix
+  // and optional suffixes. Matches appear as:
+  //
+  // "/:test(\\d+)?" => ["/", "test", "\d+", undefined, "?", undefined]
+  // "/route(\\d+)"  => [undefined, undefined, undefined, "\d+", undefined, undefined]
+  // "/*"            => ["/", undefined, undefined, undefined, undefined, "*"]
+  '([\\/.])?(?:(?:\\:(\\w+)(?:\\(((?:\\\\.|[^()])+)\\))?|\\(((?:\\\\.|[^()])+)\\))([+*?])?|(\\*))'
+].join('|'), 'g');
+
+/**
+ * Parse a string for the raw tokens.
+ *
+ * @param  {String} str
+ * @return {Array}
+ */
+function parse (str) {
+  var tokens = [];
+  var key = 0;
+  var index = 0;
+  var path = '';
+  var res;
+
+  while ((res = PATH_REGEXP.exec(str)) != null) {
+    var m = res[0];
+    var escaped = res[1];
+    var offset = res.index;
+    path += str.slice(index, offset);
+    index = offset + m.length;
+
+    // Ignore already escaped sequences.
+    if (escaped) {
+      path += escaped[1];
+      continue
+    }
+
+    // Push the current path onto the tokens.
+    if (path) {
+      tokens.push(path);
+      path = '';
+    }
+
+    var prefix = res[2];
+    var name = res[3];
+    var capture = res[4];
+    var group = res[5];
+    var suffix = res[6];
+    var asterisk = res[7];
+
+    var repeat = suffix === '+' || suffix === '*';
+    var optional = suffix === '?' || suffix === '*';
+    var delimiter = prefix || '/';
+    var pattern = capture || group || (asterisk ? '.*' : '[^' + delimiter + ']+?');
+
+    tokens.push({
+      name: name || key++,
+      prefix: prefix || '',
+      delimiter: delimiter,
+      optional: optional,
+      repeat: repeat,
+      pattern: escapeGroup(pattern)
+    });
+  }
+
+  // Match any characters still remaining.
+  if (index < str.length) {
+    path += str.substr(index);
+  }
+
+  // If the path exists, push it onto the end.
+  if (path) {
+    tokens.push(path);
+  }
+
+  return tokens
+}
+
+/**
+ * Compile a string to a template function for the path.
+ *
+ * @param  {String}   str
+ * @return {Function}
+ */
+function compile (str) {
+  return tokensToFunction(parse(str))
+}
+
+/**
+ * Expose a method for transforming tokens into the path function.
+ */
+function tokensToFunction (tokens) {
+  // Compile all the tokens into regexps.
+  var matches = new Array(tokens.length);
+
+  // Compile all the patterns before compilation.
+  for (var i = 0; i < tokens.length; i++) {
+    if (typeof tokens[i] === 'object') {
+      matches[i] = new RegExp('^' + tokens[i].pattern + '$');
+    }
+  }
+
+  return function (obj) {
+    var path = '';
+    var data = obj || {};
+
+    for (var i = 0; i < tokens.length; i++) {
+      var token = tokens[i];
+
+      if (typeof token === 'string') {
+        path += token;
+
+        continue
+      }
+
+      var value = data[token.name];
+      var segment;
+
+      if (value == null) {
+        if (token.optional) {
+          continue
+        } else {
+          throw new TypeError('Expected "' + token.name + '" to be defined')
+        }
+      }
+
+      if (isarray(value)) {
+        if (!token.repeat) {
+          throw new TypeError('Expected "' + token.name + '" to not repeat, but received "' + value + '"')
+        }
+
+        if (value.length === 0) {
+          if (token.optional) {
+            continue
+          } else {
+            throw new TypeError('Expected "' + token.name + '" to not be empty')
+          }
+        }
+
+        for (var j = 0; j < value.length; j++) {
+          segment = encodeURIComponent(value[j]);
+
+          if (!matches[i].test(segment)) {
+            throw new TypeError('Expected all "' + token.name + '" to match "' + token.pattern + '", but received "' + segment + '"')
+          }
+
+          path += (j === 0 ? token.prefix : token.delimiter) + segment;
+        }
+
+        continue
+      }
+
+      segment = encodeURIComponent(value);
+
+      if (!matches[i].test(segment)) {
+        throw new TypeError('Expected "' + token.name + '" to match "' + token.pattern + '", but received "' + segment + '"')
+      }
+
+      path += token.prefix + segment;
+    }
+
+    return path
+  }
+}
+
+/**
+ * Escape a regular expression string.
+ *
+ * @param  {String} str
+ * @return {String}
+ */
+function escapeString (str) {
+  return str.replace(/([.+*?=^!:${}()[\]|\/])/g, '\\$1')
+}
+
+/**
+ * Escape the capturing group by escaping special characters and meaning.
+ *
+ * @param  {String} group
+ * @return {String}
+ */
+function escapeGroup (group) {
+  return group.replace(/([=!:$\/()])/g, '\\$1')
+}
+
+/**
+ * Attach the keys as a property of the regexp.
+ *
+ * @param  {RegExp} re
+ * @param  {Array}  keys
+ * @return {RegExp}
+ */
+function attachKeys (re, keys) {
+  re.keys = keys;
+  return re
+}
+
+/**
+ * Get the flags for a regexp from the options.
+ *
+ * @param  {Object} options
+ * @return {String}
+ */
+function flags (options) {
+  return options.sensitive ? '' : 'i'
+}
+
+/**
+ * Pull out keys from a regexp.
+ *
+ * @param  {RegExp} path
+ * @param  {Array}  keys
+ * @return {RegExp}
+ */
+function regexpToRegexp (path, keys) {
+  // Use a negative lookahead to match only capturing groups.
+  var groups = path.source.match(/\((?!\?)/g);
+
+  if (groups) {
+    for (var i = 0; i < groups.length; i++) {
+      keys.push({
+        name: i,
+        prefix: null,
+        delimiter: null,
+        optional: false,
+        repeat: false,
+        pattern: null
+      });
+    }
+  }
+
+  return attachKeys(path, keys)
+}
+
+/**
+ * Transform an array into a regexp.
+ *
+ * @param  {Array}  path
+ * @param  {Array}  keys
+ * @param  {Object} options
+ * @return {RegExp}
+ */
+function arrayToRegexp (path, keys, options) {
+  var parts = [];
+
+  for (var i = 0; i < path.length; i++) {
+    parts.push(pathToRegexp(path[i], keys, options).source);
+  }
+
+  var regexp = new RegExp('(?:' + parts.join('|') + ')', flags(options));
+
+  return attachKeys(regexp, keys)
+}
+
+/**
+ * Create a path regexp from string input.
+ *
+ * @param  {String} path
+ * @param  {Array}  keys
+ * @param  {Object} options
+ * @return {RegExp}
+ */
+function stringToRegexp (path, keys, options) {
+  var tokens = parse(path);
+  var re = tokensToRegExp(tokens, options);
+
+  // Attach keys back to the regexp.
+  for (var i = 0; i < tokens.length; i++) {
+    if (typeof tokens[i] !== 'string') {
+      keys.push(tokens[i]);
+    }
+  }
+
+  return attachKeys(re, keys)
+}
+
+/**
+ * Expose a function for taking tokens and returning a RegExp.
+ *
+ * @param  {Array}  tokens
+ * @param  {Array}  keys
+ * @param  {Object} options
+ * @return {RegExp}
+ */
+function tokensToRegExp (tokens, options) {
+  options = options || {};
+
+  var strict = options.strict;
+  var end = options.end !== false;
+  var route = '';
+  var lastToken = tokens[tokens.length - 1];
+  var endsWithSlash = typeof lastToken === 'string' && /\/$/.test(lastToken);
+
+  // Iterate over the tokens and create our regexp string.
+  for (var i = 0; i < tokens.length; i++) {
+    var token = tokens[i];
+
+    if (typeof token === 'string') {
+      route += escapeString(token);
+    } else {
+      var prefix = escapeString(token.prefix);
+      var capture = token.pattern;
+
+      if (token.repeat) {
+        capture += '(?:' + prefix + capture + ')*';
+      }
+
+      if (token.optional) {
+        if (prefix) {
+          capture = '(?:' + prefix + '(' + capture + '))?';
+        } else {
+          capture = '(' + capture + ')?';
+        }
+      } else {
+        capture = prefix + '(' + capture + ')';
+      }
+
+      route += capture;
+    }
+  }
+
+  // In non-strict mode we allow a slash at the end of match. If the path to
+  // match already ends with a slash, we remove it for consistency. The slash
+  // is valid at the end of a path match, not in the middle. This is important
+  // in non-ending mode, where "/test/" shouldn't match "/test//route".
+  if (!strict) {
+    route = (endsWithSlash ? route.slice(0, -2) : route) + '(?:\\/(?=$))?';
+  }
+
+  if (end) {
+    route += '$';
+  } else {
+    // In non-ending mode, we need the capturing groups to match as much as
+    // possible by using a positive lookahead to the end or next path segment.
+    route += strict && endsWithSlash ? '' : '(?=\\/|$)';
+  }
+
+  return new RegExp('^' + route, flags(options))
+}
+
+/**
+ * Normalize the given path string, returning a regular expression.
+ *
+ * An empty array can be passed in for the keys, which will hold the
+ * placeholder key descriptions. For example, using `/user/:id`, `keys` will
+ * contain `[{ name: 'id', delimiter: '/', optional: false, repeat: false }]`.
+ *
+ * @param  {(String|RegExp|Array)} path
+ * @param  {Array}                 [keys]
+ * @param  {Object}                [options]
+ * @return {RegExp}
+ */
+function pathToRegexp (path, keys, options) {
+  keys = keys || [];
+
+  if (!isarray(keys)) {
+    options = keys;
+    keys = [];
+  } else if (!options) {
+    options = {};
+  }
+
+  if (path instanceof RegExp) {
+    return regexpToRegexp(path, keys, options)
+  }
+
+  if (isarray(path)) {
+    return arrayToRegexp(path, keys, options)
+  }
+
+  return stringToRegexp(path, keys, options)
+}
+
+pathToRegexp_1.parse = parse_1;
+pathToRegexp_1.compile = compile_1;
+pathToRegexp_1.tokensToFunction = tokensToFunction_1;
+pathToRegexp_1.tokensToRegExp = tokensToRegExp_1;
+
+/**
+   * Module dependencies.
+   */
+
+  
+
+  /**
+   * Short-cuts for global-object checks
+   */
+
+  var hasDocument = ('undefined' !== typeof document);
+  var hasWindow = ('undefined' !== typeof window);
+  var hasHistory = ('undefined' !== typeof history);
+  var hasProcess = typeof process !== 'undefined';
+
+  /**
+   * Detect click event
+   */
+  var clickEvent = hasDocument && document.ontouchstart ? 'touchstart' : 'click';
+
+  /**
+   * To work properly with the URL
+   * history.location generated polyfill in https://github.com/devote/HTML5-History-API
+   */
+
+  var isLocation = hasWindow && !!(window.history.location || window.location);
+
+  /**
+   * The page instance
+   * @api private
+   */
+  function Page() {
+    // public things
+    this.callbacks = [];
+    this.exits = [];
+    this.current = '';
+    this.len = 0;
+
+    // private things
+    this._decodeURLComponents = true;
+    this._base = '';
+    this._strict = false;
+    this._running = false;
+    this._hashbang = false;
+
+    // bound functions
+    this.clickHandler = this.clickHandler.bind(this);
+    this._onpopstate = this._onpopstate.bind(this);
+  }
+
+  /**
+   * Configure the instance of page. This can be called multiple times.
+   *
+   * @param {Object} options
+   * @api public
+   */
+
+  Page.prototype.configure = function(options) {
+    var opts = options || {};
+
+    this._window = opts.window || (hasWindow && window);
+    this._decodeURLComponents = opts.decodeURLComponents !== false;
+    this._popstate = opts.popstate !== false && hasWindow;
+    this._click = opts.click !== false && hasDocument;
+    this._hashbang = !!opts.hashbang;
+
+    var _window = this._window;
+    if(this._popstate) {
+      _window.addEventListener('popstate', this._onpopstate, false);
+    } else if(hasWindow) {
+      _window.removeEventListener('popstate', this._onpopstate, false);
+    }
+
+    if (this._click) {
+      _window.document.addEventListener(clickEvent, this.clickHandler, false);
+    } else if(hasDocument) {
+      _window.document.removeEventListener(clickEvent, this.clickHandler, false);
+    }
+
+    if(this._hashbang && hasWindow && !hasHistory) {
+      _window.addEventListener('hashchange', this._onpopstate, false);
+    } else if(hasWindow) {
+      _window.removeEventListener('hashchange', this._onpopstate, false);
+    }
+  };
+
+  /**
+   * Get or set basepath to `path`.
+   *
+   * @param {string} path
+   * @api public
+   */
+
+  Page.prototype.base = function(path) {
+    if (0 === arguments.length) return this._base;
+    this._base = path;
+  };
+
+  /**
+   * Gets the `base`, which depends on whether we are using History or
+   * hashbang routing.
+
+   * @api private
+   */
+  Page.prototype._getBase = function() {
+    var base = this._base;
+    if(!!base) return base;
+    var loc = hasWindow && this._window && this._window.location;
+
+    if(hasWindow && this._hashbang && loc && loc.protocol === 'file:') {
+      base = loc.pathname;
+    }
+
+    return base;
+  };
+
+  /**
+   * Get or set strict path matching to `enable`
+   *
+   * @param {boolean} enable
+   * @api public
+   */
+
+  Page.prototype.strict = function(enable) {
+    if (0 === arguments.length) return this._strict;
+    this._strict = enable;
+  };
+
+
+  /**
+   * Bind with the given `options`.
+   *
+   * Options:
+   *
+   *    - `click` bind to click events [true]
+   *    - `popstate` bind to popstate [true]
+   *    - `dispatch` perform initial dispatch [true]
+   *
+   * @param {Object} options
+   * @api public
+   */
+
+  Page.prototype.start = function(options) {
+    var opts = options || {};
+    this.configure(opts);
+
+    if (false === opts.dispatch) return;
+    this._running = true;
+
+    var url;
+    if(isLocation) {
+      var window = this._window;
+      var loc = window.location;
+
+      if(this._hashbang && ~loc.hash.indexOf('#!')) {
+        url = loc.hash.substr(2) + loc.search;
+      } else if (this._hashbang) {
+        url = loc.search + loc.hash;
+      } else {
+        url = loc.pathname + loc.search + loc.hash;
+      }
+    }
+
+    this.replace(url, null, true, opts.dispatch);
+  };
+
+  /**
+   * Unbind click and popstate event handlers.
+   *
+   * @api public
+   */
+
+  Page.prototype.stop = function() {
+    if (!this._running) return;
+    this.current = '';
+    this.len = 0;
+    this._running = false;
+
+    var window = this._window;
+    this._click && window.document.removeEventListener(clickEvent, this.clickHandler, false);
+    hasWindow && window.removeEventListener('popstate', this._onpopstate, false);
+    hasWindow && window.removeEventListener('hashchange', this._onpopstate, false);
+  };
+
+  /**
+   * Show `path` with optional `state` object.
+   *
+   * @param {string} path
+   * @param {Object=} state
+   * @param {boolean=} dispatch
+   * @param {boolean=} push
+   * @return {!Context}
+   * @api public
+   */
+
+  Page.prototype.show = function(path, state, dispatch, push) {
+    var ctx = new Context(path, state, this),
+      prev = this.prevContext;
+    this.prevContext = ctx;
+    this.current = ctx.path;
+    if (false !== dispatch) this.dispatch(ctx, prev);
+    if (false !== ctx.handled && false !== push) ctx.pushState();
+    return ctx;
+  };
+
+  /**
+   * Goes back in the history
+   * Back should always let the current route push state and then go back.
+   *
+   * @param {string} path - fallback path to go back if no more history exists, if undefined defaults to page.base
+   * @param {Object=} state
+   * @api public
+   */
+
+  Page.prototype.back = function(path, state) {
+    var page = this;
+    if (this.len > 0) {
+      var window = this._window;
+      // this may need more testing to see if all browsers
+      // wait for the next tick to go back in history
+      hasHistory && window.history.back();
+      this.len--;
+    } else if (path) {
+      setTimeout(function() {
+        page.show(path, state);
+      });
+    } else {
+      setTimeout(function() {
+        page.show(page._getBase(), state);
+      });
+    }
+  };
+
+  /**
+   * Register route to redirect from one path to other
+   * or just redirect to another route
+   *
+   * @param {string} from - if param 'to' is undefined redirects to 'from'
+   * @param {string=} to
+   * @api public
+   */
+  Page.prototype.redirect = function(from, to) {
+    var inst = this;
+
+    // Define route from a path to another
+    if ('string' === typeof from && 'string' === typeof to) {
+      page.call(this, from, function(e) {
+        setTimeout(function() {
+          inst.replace(/** @type {!string} */ (to));
+        }, 0);
+      });
+    }
+
+    // Wait for the push state and replace it with another
+    if ('string' === typeof from && 'undefined' === typeof to) {
+      setTimeout(function() {
+        inst.replace(from);
+      }, 0);
+    }
+  };
+
+  /**
+   * Replace `path` with optional `state` object.
+   *
+   * @param {string} path
+   * @param {Object=} state
+   * @param {boolean=} init
+   * @param {boolean=} dispatch
+   * @return {!Context}
+   * @api public
+   */
+
+
+  Page.prototype.replace = function(path, state, init, dispatch) {
+    var ctx = new Context(path, state, this),
+      prev = this.prevContext;
+    this.prevContext = ctx;
+    this.current = ctx.path;
+    ctx.init = init;
+    ctx.save(); // save before dispatching, which may redirect
+    if (false !== dispatch) this.dispatch(ctx, prev);
+    return ctx;
+  };
+
+  /**
+   * Dispatch the given `ctx`.
+   *
+   * @param {Context} ctx
+   * @api private
+   */
+
+  Page.prototype.dispatch = function(ctx, prev) {
+    var i = 0, j = 0, page = this;
+
+    function nextExit() {
+      var fn = page.exits[j++];
+      if (!fn) return nextEnter();
+      fn(prev, nextExit);
+    }
+
+    function nextEnter() {
+      var fn = page.callbacks[i++];
+
+      if (ctx.path !== page.current) {
+        ctx.handled = false;
+        return;
+      }
+      if (!fn) return unhandled.call(page, ctx);
+      fn(ctx, nextEnter);
+    }
+
+    if (prev) {
+      nextExit();
+    } else {
+      nextEnter();
+    }
+  };
+
+  /**
+   * Register an exit route on `path` with
+   * callback `fn()`, which will be called
+   * on the previous context when a new
+   * page is visited.
+   */
+  Page.prototype.exit = function(path, fn) {
+    if (typeof path === 'function') {
+      return this.exit('*', path);
+    }
+
+    var route = new Route(path, null, this);
+    for (var i = 1; i < arguments.length; ++i) {
+      this.exits.push(route.middleware(arguments[i]));
+    }
+  };
+
+  /**
+   * Handle "click" events.
+   */
+
+  /* jshint +W054 */
+  Page.prototype.clickHandler = function(e) {
+    if (1 !== this._which(e)) return;
+
+    if (e.metaKey || e.ctrlKey || e.shiftKey) return;
+    if (e.defaultPrevented) return;
+
+    // ensure link
+    // use shadow dom when available if not, fall back to composedPath()
+    // for browsers that only have shady
+    var el = e.target;
+    var eventPath = e.path || (e.composedPath ? e.composedPath() : null);
+
+    if(eventPath) {
+      for (var i = 0; i < eventPath.length; i++) {
+        if (!eventPath[i].nodeName) continue;
+        if (eventPath[i].nodeName.toUpperCase() !== 'A') continue;
+        if (!eventPath[i].href) continue;
+
+        el = eventPath[i];
+        break;
+      }
+    }
+
+    // continue ensure link
+    // el.nodeName for svg links are 'a' instead of 'A'
+    while (el && 'A' !== el.nodeName.toUpperCase()) el = el.parentNode;
+    if (!el || 'A' !== el.nodeName.toUpperCase()) return;
+
+    // check if link is inside an svg
+    // in this case, both href and target are always inside an object
+    var svg = (typeof el.href === 'object') && el.href.constructor.name === 'SVGAnimatedString';
+
+    // Ignore if tag has
+    // 1. "download" attribute
+    // 2. rel="external" attribute
+    if (el.hasAttribute('download') || el.getAttribute('rel') === 'external') return;
+
+    // ensure non-hash for the same path
+    var link = el.getAttribute('href');
+    if(!this._hashbang && this._samePath(el) && (el.hash || '#' === link)) return;
+
+    // Check for mailto: in the href
+    if (link && link.indexOf('mailto:') > -1) return;
+
+    // check target
+    // svg target is an object and its desired value is in .baseVal property
+    if (svg ? el.target.baseVal : el.target) return;
+
+    // x-origin
+    // note: svg links that are not relative don't call click events (and skip page.js)
+    // consequently, all svg links tested inside page.js are relative and in the same origin
+    if (!svg && !this.sameOrigin(el.href)) return;
+
+    // rebuild path
+    // There aren't .pathname and .search properties in svg links, so we use href
+    // Also, svg href is an object and its desired value is in .baseVal property
+    var path = svg ? el.href.baseVal : (el.pathname + el.search + (el.hash || ''));
+
+    path = path[0] !== '/' ? '/' + path : path;
+
+    // strip leading "/[drive letter]:" on NW.js on Windows
+    if (hasProcess && path.match(/^\/[a-zA-Z]:\//)) {
+      path = path.replace(/^\/[a-zA-Z]:\//, '/');
+    }
+
+    // same page
+    var orig = path;
+    var pageBase = this._getBase();
+
+    if (path.indexOf(pageBase) === 0) {
+      path = path.substr(pageBase.length);
+    }
+
+    if (this._hashbang) path = path.replace('#!', '');
+
+    if (pageBase && orig === path && (!isLocation || this._window.location.protocol !== 'file:')) {
+      return;
+    }
+
+    e.preventDefault();
+    this.show(orig);
+  };
+
+  /**
+   * Handle "populate" events.
+   * @api private
+   */
+
+  Page.prototype._onpopstate = (function () {
+    var loaded = false;
+    if ( ! hasWindow ) {
+      return function () {};
+    }
+    if (hasDocument && document.readyState === 'complete') {
+      loaded = true;
+    } else {
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          loaded = true;
+        }, 0);
+      });
+    }
+    return function onpopstate(e) {
+      if (!loaded) return;
+      var page = this;
+      if (e.state) {
+        var path = e.state.path;
+        page.replace(path, e.state);
+      } else if (isLocation) {
+        var loc = page._window.location;
+        page.show(loc.pathname + loc.search + loc.hash, undefined, undefined, false);
+      }
+    };
+  })();
+
+  /**
+   * Event button.
+   */
+  Page.prototype._which = function(e) {
+    e = e || (hasWindow && this._window.event);
+    return null == e.which ? e.button : e.which;
+  };
+
+  /**
+   * Convert to a URL object
+   * @api private
+   */
+  Page.prototype._toURL = function(href) {
+    var window = this._window;
+    if(typeof URL === 'function' && isLocation) {
+      return new URL(href, window.location.toString());
+    } else if (hasDocument) {
+      var anc = window.document.createElement('a');
+      anc.href = href;
+      return anc;
+    }
+  };
+
+  /**
+   * Check if `href` is the same origin.
+   * @param {string} href
+   * @api public
+   */
+  Page.prototype.sameOrigin = function(href) {
+    if(!href || !isLocation) return false;
+
+    var url = this._toURL(href);
+    var window = this._window;
+
+    var loc = window.location;
+
+    /*
+       When the port is the default http port 80 for http, or 443 for
+       https, internet explorer 11 returns an empty string for loc.port,
+       so we need to compare loc.port with an empty string if url.port
+       is the default port 80 or 443.
+       Also the comparition with `port` is changed from `===` to `==` because
+       `port` can be a string sometimes. This only applies to ie11.
+    */
+    return loc.protocol === url.protocol &&
+      loc.hostname === url.hostname &&
+      (loc.port === url.port || loc.port === '' && (url.port == 80 || url.port == 443)); // jshint ignore:line
+  };
+
+  /**
+   * @api private
+   */
+  Page.prototype._samePath = function(url) {
+    if(!isLocation) return false;
+    var window = this._window;
+    var loc = window.location;
+    return url.pathname === loc.pathname &&
+      url.search === loc.search;
+  };
+
+  /**
+   * Remove URL encoding from the given `str`.
+   * Accommodates whitespace in both x-www-form-urlencoded
+   * and regular percent-encoded form.
+   *
+   * @param {string} val - URL component to decode
+   * @api private
+   */
+  Page.prototype._decodeURLEncodedURIComponent = function(val) {
+    if (typeof val !== 'string') { return val; }
+    return this._decodeURLComponents ? decodeURIComponent(val.replace(/\+/g, ' ')) : val;
+  };
+
+  /**
+   * Create a new `page` instance and function
+   */
+  function createPage() {
+    var pageInstance = new Page();
+
+    function pageFn(/* args */) {
+      return page.apply(pageInstance, arguments);
+    }
+
+    // Copy all of the things over. In 2.0 maybe we use setPrototypeOf
+    pageFn.callbacks = pageInstance.callbacks;
+    pageFn.exits = pageInstance.exits;
+    pageFn.base = pageInstance.base.bind(pageInstance);
+    pageFn.strict = pageInstance.strict.bind(pageInstance);
+    pageFn.start = pageInstance.start.bind(pageInstance);
+    pageFn.stop = pageInstance.stop.bind(pageInstance);
+    pageFn.show = pageInstance.show.bind(pageInstance);
+    pageFn.back = pageInstance.back.bind(pageInstance);
+    pageFn.redirect = pageInstance.redirect.bind(pageInstance);
+    pageFn.replace = pageInstance.replace.bind(pageInstance);
+    pageFn.dispatch = pageInstance.dispatch.bind(pageInstance);
+    pageFn.exit = pageInstance.exit.bind(pageInstance);
+    pageFn.configure = pageInstance.configure.bind(pageInstance);
+    pageFn.sameOrigin = pageInstance.sameOrigin.bind(pageInstance);
+    pageFn.clickHandler = pageInstance.clickHandler.bind(pageInstance);
+
+    pageFn.create = createPage;
+
+    Object.defineProperty(pageFn, 'len', {
+      get: function(){
+        return pageInstance.len;
+      },
+      set: function(val) {
+        pageInstance.len = val;
+      }
+    });
+
+    Object.defineProperty(pageFn, 'current', {
+      get: function(){
+        return pageInstance.current;
+      },
+      set: function(val) {
+        pageInstance.current = val;
+      }
+    });
+
+    // In 2.0 these can be named exports
+    pageFn.Context = Context;
+    pageFn.Route = Route;
+
+    return pageFn;
+  }
+
+  /**
+   * Register `path` with callback `fn()`,
+   * or route `path`, or redirection,
+   * or `page.start()`.
+   *
+   *   page(fn);
+   *   page('*', fn);
+   *   page('/user/:id', load, user);
+   *   page('/user/' + user.id, { some: 'thing' });
+   *   page('/user/' + user.id);
+   *   page('/from', '/to')
+   *   page();
+   *
+   * @param {string|!Function|!Object} path
+   * @param {Function=} fn
+   * @api public
+   */
+
+  function page(path, fn) {
+    // <callback>
+    if ('function' === typeof path) {
+      return page.call(this, '*', path);
+    }
+
+    // route <path> to <callback ...>
+    if ('function' === typeof fn) {
+      var route = new Route(/** @type {string} */ (path), null, this);
+      for (var i = 1; i < arguments.length; ++i) {
+        this.callbacks.push(route.middleware(arguments[i]));
+      }
+      // show <path> with [state]
+    } else if ('string' === typeof path) {
+      this['string' === typeof fn ? 'redirect' : 'show'](path, fn);
+      // start [options]
+    } else {
+      this.start(path);
+    }
+  }
+
+  /**
+   * Unhandled `ctx`. When it's not the initial
+   * popstate then redirect. If you wish to handle
+   * 404s on your own use `page('*', callback)`.
+   *
+   * @param {Context} ctx
+   * @api private
+   */
+  function unhandled(ctx) {
+    if (ctx.handled) return;
+    var current;
+    var page = this;
+    var window = page._window;
+
+    if (page._hashbang) {
+      current = isLocation && this._getBase() + window.location.hash.replace('#!', '');
+    } else {
+      current = isLocation && window.location.pathname + window.location.search;
+    }
+
+    if (current === ctx.canonicalPath) return;
+    page.stop();
+    ctx.handled = false;
+    isLocation && (window.location.href = ctx.canonicalPath);
+  }
+
+  /**
+   * Escapes RegExp characters in the given string.
+   *
+   * @param {string} s
+   * @api private
+   */
+  function escapeRegExp(s) {
+    return s.replace(/([.+*?=^!:${}()[\]|/\\])/g, '\\$1');
+  }
+
+  /**
+   * Initialize a new "request" `Context`
+   * with the given `path` and optional initial `state`.
+   *
+   * @constructor
+   * @param {string} path
+   * @param {Object=} state
+   * @api public
+   */
+
+  function Context(path, state, pageInstance) {
+    var _page = this.page = pageInstance || page;
+    var window = _page._window;
+    var hashbang = _page._hashbang;
+
+    var pageBase = _page._getBase();
+    if ('/' === path[0] && 0 !== path.indexOf(pageBase)) path = pageBase + (hashbang ? '#!' : '') + path;
+    var i = path.indexOf('?');
+
+    this.canonicalPath = path;
+    var re = new RegExp('^' + escapeRegExp(pageBase));
+    this.path = path.replace(re, '') || '/';
+    if (hashbang) this.path = this.path.replace('#!', '') || '/';
+
+    this.title = (hasDocument && window.document.title);
+    this.state = state || {};
+    this.state.path = path;
+    this.querystring = ~i ? _page._decodeURLEncodedURIComponent(path.slice(i + 1)) : '';
+    this.pathname = _page._decodeURLEncodedURIComponent(~i ? path.slice(0, i) : path);
+    this.params = {};
+
+    // fragment
+    this.hash = '';
+    if (!hashbang) {
+      if (!~this.path.indexOf('#')) return;
+      var parts = this.path.split('#');
+      this.path = this.pathname = parts[0];
+      this.hash = _page._decodeURLEncodedURIComponent(parts[1]) || '';
+      this.querystring = this.querystring.split('#')[0];
+    }
+  }
+
+  /**
+   * Push state.
+   *
+   * @api private
+   */
+
+  Context.prototype.pushState = function() {
+    var page = this.page;
+    var window = page._window;
+    var hashbang = page._hashbang;
+
+    page.len++;
+    if (hasHistory) {
+        window.history.pushState(this.state, this.title,
+          hashbang && this.path !== '/' ? '#!' + this.path : this.canonicalPath);
+    }
+  };
+
+  /**
+   * Save the context state.
+   *
+   * @api public
+   */
+
+  Context.prototype.save = function() {
+    var page = this.page;
+    if (hasHistory) {
+        page._window.history.replaceState(this.state, this.title,
+          page._hashbang && this.path !== '/' ? '#!' + this.path : this.canonicalPath);
+    }
+  };
+
+  /**
+   * Initialize `Route` with the given HTTP `path`,
+   * and an array of `callbacks` and `options`.
+   *
+   * Options:
+   *
+   *   - `sensitive`    enable case-sensitive routes
+   *   - `strict`       enable strict matching for trailing slashes
+   *
+   * @constructor
+   * @param {string} path
+   * @param {Object=} options
+   * @api private
+   */
+
+  function Route(path, options, page) {
+    var _page = this.page = page || globalPage;
+    var opts = options || {};
+    opts.strict = opts.strict || _page._strict;
+    this.path = (path === '*') ? '(.*)' : path;
+    this.method = 'GET';
+    this.regexp = pathToRegexp_1(this.path, this.keys = [], opts);
+  }
+
+  /**
+   * Return route middleware with
+   * the given callback `fn()`.
+   *
+   * @param {Function} fn
+   * @return {Function}
+   * @api public
+   */
+
+  Route.prototype.middleware = function(fn) {
+    var self = this;
+    return function(ctx, next) {
+      if (self.match(ctx.path, ctx.params)) {
+        ctx.routePath = self.path;
+        return fn(ctx, next);
+      }
+      next();
+    };
+  };
+
+  /**
+   * Check if this route matches `path`, if so
+   * populate `params`.
+   *
+   * @param {string} path
+   * @param {Object} params
+   * @return {boolean}
+   * @api private
+   */
+
+  Route.prototype.match = function(path, params) {
+    var keys = this.keys,
+      qsIndex = path.indexOf('?'),
+      pathname = ~qsIndex ? path.slice(0, qsIndex) : path,
+      m = this.regexp.exec(decodeURIComponent(pathname));
+
+    if (!m) return false;
+
+    delete params[0];
+
+    for (var i = 1, len = m.length; i < len; ++i) {
+      var key = keys[i - 1];
+      var val = this.page._decodeURLEncodedURIComponent(m[i]);
+      if (val !== undefined || !(hasOwnProperty.call(params, key.name))) {
+        params[key.name] = val;
+      }
+    }
+
+    return true;
+  };
+
+
+  /**
+   * Module exports.
+   */
+
+  var globalPage = createPage();
+  var page_js = globalPage;
+  var default_1 = globalPage;
+
+page_js.default = default_1;
+
+return page_js;
+
+})));
+
+
+/***/ }),
+
+/***/ 96073:
+/***/ (function(module) {
+
+"use strict";
+module.exports = window.jQuery;
+
+/***/ })
+
+/******/ 	});
+/************************************************************************/
+/******/ 	// The module cache
+/******/ 	var __webpack_module_cache__ = {};
+/******/ 	
+/******/ 	// The require function
+/******/ 	function __webpack_require__(moduleId) {
+/******/ 		// Check if module is in cache
+/******/ 		var cachedModule = __webpack_module_cache__[moduleId];
+/******/ 		if (cachedModule !== undefined) {
+/******/ 			return cachedModule.exports;
+/******/ 		}
+/******/ 		// Create a new module (and put it into the cache)
+/******/ 		var module = __webpack_module_cache__[moduleId] = {
+/******/ 			id: moduleId,
+/******/ 			// no module.loaded needed
+/******/ 			exports: {}
+/******/ 		};
+/******/ 	
+/******/ 		// Execute the module function
+/******/ 		__webpack_modules__[moduleId].call(module.exports, module, module.exports, __webpack_require__);
+/******/ 	
+/******/ 		// Return the exports of the module
+/******/ 		return module.exports;
+/******/ 	}
+/******/ 	
+/******/ 	// expose the modules object (__webpack_modules__)
+/******/ 	__webpack_require__.m = __webpack_modules__;
+/******/ 	
+/************************************************************************/
+/******/ 	/* webpack/runtime/compat get default export */
+/******/ 	!function() {
+/******/ 		// getDefaultExport function for compatibility with non-harmony modules
+/******/ 		__webpack_require__.n = function(module) {
+/******/ 			var getter = module && module.__esModule ?
+/******/ 				function() { return module['default']; } :
+/******/ 				function() { return module; };
+/******/ 			__webpack_require__.d(getter, { a: getter });
+/******/ 			return getter;
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/create fake namespace object */
+/******/ 	!function() {
+/******/ 		var getProto = Object.getPrototypeOf ? function(obj) { return Object.getPrototypeOf(obj); } : function(obj) { return obj.__proto__; };
+/******/ 		var leafPrototypes;
+/******/ 		// create a fake namespace object
+/******/ 		// mode & 1: value is a module id, require it
+/******/ 		// mode & 2: merge all properties of value into the ns
+/******/ 		// mode & 4: return value when already ns object
+/******/ 		// mode & 16: return value when it's Promise-like
+/******/ 		// mode & 8|1: behave like require
+/******/ 		__webpack_require__.t = function(value, mode) {
+/******/ 			if(mode & 1) value = this(value);
+/******/ 			if(mode & 8) return value;
+/******/ 			if(typeof value === 'object' && value) {
+/******/ 				if((mode & 4) && value.__esModule) return value;
+/******/ 				if((mode & 16) && typeof value.then === 'function') return value;
+/******/ 			}
+/******/ 			var ns = Object.create(null);
+/******/ 			__webpack_require__.r(ns);
+/******/ 			var def = {};
+/******/ 			leafPrototypes = leafPrototypes || [null, getProto({}), getProto([]), getProto(getProto)];
+/******/ 			for(var current = mode & 2 && value; typeof current == 'object' && !~leafPrototypes.indexOf(current); current = getProto(current)) {
+/******/ 				Object.getOwnPropertyNames(current).forEach(function(key) { def[key] = function() { return value[key]; }; });
+/******/ 			}
+/******/ 			def['default'] = function() { return value; };
+/******/ 			__webpack_require__.d(ns, def);
+/******/ 			return ns;
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/define property getters */
+/******/ 	!function() {
+/******/ 		// define getter functions for harmony exports
+/******/ 		__webpack_require__.d = function(exports, definition) {
+/******/ 			for(var key in definition) {
+/******/ 				if(__webpack_require__.o(definition, key) && !__webpack_require__.o(exports, key)) {
+/******/ 					Object.defineProperty(exports, key, { enumerable: true, get: definition[key] });
+/******/ 				}
+/******/ 			}
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/ensure chunk */
+/******/ 	!function() {
+/******/ 		__webpack_require__.f = {};
+/******/ 		// This file contains only the entry chunk.
+/******/ 		// The chunk loading function for additional chunks
+/******/ 		__webpack_require__.e = function(chunkId) {
+/******/ 			return Promise.all(Object.keys(__webpack_require__.f).reduce(function(promises, key) {
+/******/ 				__webpack_require__.f[key](chunkId, promises);
+/******/ 				return promises;
+/******/ 			}, []));
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/get javascript chunk filename */
+/******/ 	!function() {
+/******/ 		// This function allow to reference async chunks
+/******/ 		__webpack_require__.u = function(chunkId) {
+/******/ 			// return url for filenames based on template
+/******/ 			return "chunk/myjobs/" + chunkId + "-" + {"26":"342dce492064c50e45f3","134":"4413cc5937e1dfdb345b","369":"4a0bfc16b3db500f3d1c","560":"ade20efdca79ec45f67a","1115":"7fd4e0c6e90bb8d04290","1130":"3768e993366097751943","1268":"31e6de351fa24f3b2838","1323":"77e673ccd83eb958b099","2029":"e2a3036ed4ca02e645d6","2491":"5218609e520cf36e27ab","2727":"4be218e87f548a7d559f","2962":"48a620205011394b558d","3111":"e3c9d9d9df33fdf08a52","3205":"aa488aa51495eb0a5532","3535":"5787d031c6695360e0d5","3736":"d3f7e43080f5102d1417","3772":"601d8cba0ef44b7c7493","3915":"6578c249c315487ce1ae","4245":"368017b92b9d03769641","4365":"7b293eecf4656d3cd688","4577":"efcae0d67ad04a01b2e4","4842":"57a362b504c21d14399e","4917":"757d87d079cc62f4787d","5105":"a59b1996279f5b0f2846","5836":"fbbe187eff565b69e384","5902":"4f73c54433d145ddd0dc","6220":"4e61ea4db2b47260016a","6402":"563f36b48caeacbe2c1c","6818":"01256b1e030eaef6ab0d","6848":"afe9ba1b03e4e7d96104","7134":"db7f1068e5813730025f","7220":"be25c6f6899113e58c01","7737":"0bccf696e1f3f039ec96","8234":"be9750db3d72b4938962","8497":"882a3ad7c0ab13fb5aea","8517":"dbd97f724be64e53196a","9312":"d2ab53d2dd31e473a853"}[chunkId] + ".m.js";
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/get mini-css chunk filename */
+/******/ 	!function() {
+/******/ 		// This function allow to reference async chunks
+/******/ 		__webpack_require__.miniCssF = function(chunkId) {
+/******/ 			// return url for filenames based on template
+/******/ 			return "../css/myjobs/chunk/" + chunkId + "-" + "05f8d12b7d6babc2b2cd" + ".css";
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/global */
+/******/ 	!function() {
+/******/ 		__webpack_require__.g = (function() {
+/******/ 			if (typeof globalThis === 'object') return globalThis;
+/******/ 			try {
+/******/ 				return this || new Function('return this')();
+/******/ 			} catch (e) {
+/******/ 				if (typeof window === 'object') return window;
+/******/ 			}
+/******/ 		})();
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/hasOwnProperty shorthand */
+/******/ 	!function() {
+/******/ 		__webpack_require__.o = function(obj, prop) { return Object.prototype.hasOwnProperty.call(obj, prop); }
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/load script */
+/******/ 	!function() {
+/******/ 		var inProgress = {};
+/******/ 		var dataWebpackPrefix = "brightermonday:";
+/******/ 		// loadScript function to load a script via script tag
+/******/ 		__webpack_require__.l = function(url, done, key, chunkId) {
+/******/ 			if(inProgress[url]) { inProgress[url].push(done); return; }
+/******/ 			var script, needAttach;
+/******/ 			if(key !== undefined) {
+/******/ 				var scripts = document.getElementsByTagName("script");
+/******/ 				for(var i = 0; i < scripts.length; i++) {
+/******/ 					var s = scripts[i];
+/******/ 					if(s.getAttribute("src") == url || s.getAttribute("data-webpack") == dataWebpackPrefix + key) { script = s; break; }
+/******/ 				}
+/******/ 			}
+/******/ 			if(!script) {
+/******/ 				needAttach = true;
+/******/ 				script = document.createElement('script');
+/******/ 		
+/******/ 				script.charset = 'utf-8';
+/******/ 				script.timeout = 120;
+/******/ 				if (__webpack_require__.nc) {
+/******/ 					script.setAttribute("nonce", __webpack_require__.nc);
+/******/ 				}
+/******/ 				script.setAttribute("data-webpack", dataWebpackPrefix + key);
+/******/ 				script.src = url;
+/******/ 			}
+/******/ 			inProgress[url] = [done];
+/******/ 			var onScriptComplete = function(prev, event) {
+/******/ 				// avoid mem leaks in IE.
+/******/ 				script.onerror = script.onload = null;
+/******/ 				clearTimeout(timeout);
+/******/ 				var doneFns = inProgress[url];
+/******/ 				delete inProgress[url];
+/******/ 				script.parentNode && script.parentNode.removeChild(script);
+/******/ 				doneFns && doneFns.forEach(function(fn) { return fn(event); });
+/******/ 				if(prev) return prev(event);
+/******/ 			}
+/******/ 			;
+/******/ 			var timeout = setTimeout(onScriptComplete.bind(null, undefined, { type: 'timeout', target: script }), 120000);
+/******/ 			script.onerror = onScriptComplete.bind(null, script.onerror);
+/******/ 			script.onload = onScriptComplete.bind(null, script.onload);
+/******/ 			needAttach && document.head.appendChild(script);
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/make namespace object */
+/******/ 	!function() {
+/******/ 		// define __esModule on exports
+/******/ 		__webpack_require__.r = function(exports) {
+/******/ 			if(typeof Symbol !== 'undefined' && Symbol.toStringTag) {
+/******/ 				Object.defineProperty(exports, Symbol.toStringTag, { value: 'Module' });
+/******/ 			}
+/******/ 			Object.defineProperty(exports, '__esModule', { value: true });
+/******/ 		};
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/publicPath */
+/******/ 	!function() {
+/******/ 		__webpack_require__.p = "/assets/scripts/";
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/css loading */
+/******/ 	!function() {
+/******/ 		var createStylesheet = function(chunkId, fullhref, resolve, reject) {
+/******/ 			var linkTag = document.createElement("link");
+/******/ 		
+/******/ 			linkTag.rel = "stylesheet";
+/******/ 			linkTag.type = "text/css";
+/******/ 			var onLinkComplete = function(event) {
+/******/ 				// avoid mem leaks.
+/******/ 				linkTag.onerror = linkTag.onload = null;
+/******/ 				if (event.type === 'load') {
+/******/ 					resolve();
+/******/ 				} else {
+/******/ 					var errorType = event && (event.type === 'load' ? 'missing' : event.type);
+/******/ 					var realHref = event && event.target && event.target.href || fullhref;
+/******/ 					var err = new Error("Loading CSS chunk " + chunkId + " failed.\n(" + realHref + ")");
+/******/ 					err.code = "CSS_CHUNK_LOAD_FAILED";
+/******/ 					err.type = errorType;
+/******/ 					err.request = realHref;
+/******/ 					linkTag.parentNode.removeChild(linkTag)
+/******/ 					reject(err);
+/******/ 				}
+/******/ 			}
+/******/ 			linkTag.onerror = linkTag.onload = onLinkComplete;
+/******/ 			linkTag.href = fullhref;
+/******/ 		
+/******/ 			document.head.appendChild(linkTag);
+/******/ 			return linkTag;
+/******/ 		};
+/******/ 		var findStylesheet = function(href, fullhref) {
+/******/ 			var existingLinkTags = document.getElementsByTagName("link");
+/******/ 			for(var i = 0; i < existingLinkTags.length; i++) {
+/******/ 				var tag = existingLinkTags[i];
+/******/ 				var dataHref = tag.getAttribute("data-href") || tag.getAttribute("href");
+/******/ 				if(tag.rel === "stylesheet" && (dataHref === href || dataHref === fullhref)) return tag;
+/******/ 			}
+/******/ 			var existingStyleTags = document.getElementsByTagName("style");
+/******/ 			for(var i = 0; i < existingStyleTags.length; i++) {
+/******/ 				var tag = existingStyleTags[i];
+/******/ 				var dataHref = tag.getAttribute("data-href");
+/******/ 				if(dataHref === href || dataHref === fullhref) return tag;
+/******/ 			}
+/******/ 		};
+/******/ 		var loadStylesheet = function(chunkId) {
+/******/ 			return new Promise(function(resolve, reject) {
+/******/ 				var href = __webpack_require__.miniCssF(chunkId);
+/******/ 				var fullhref = __webpack_require__.p + href;
+/******/ 				if(findStylesheet(href, fullhref)) return resolve();
+/******/ 				createStylesheet(chunkId, fullhref, resolve, reject);
+/******/ 			});
+/******/ 		}
+/******/ 		// object to store loaded CSS chunks
+/******/ 		var installedCssChunks = {
+/******/ 			2143: 0
+/******/ 		};
+/******/ 		
+/******/ 		__webpack_require__.f.miniCss = function(chunkId, promises) {
+/******/ 			var cssChunks = {"6848":1};
+/******/ 			if(installedCssChunks[chunkId]) promises.push(installedCssChunks[chunkId]);
+/******/ 			else if(installedCssChunks[chunkId] !== 0 && cssChunks[chunkId]) {
+/******/ 				promises.push(installedCssChunks[chunkId] = loadStylesheet(chunkId).then(function() {
+/******/ 					installedCssChunks[chunkId] = 0;
+/******/ 				}, function(e) {
+/******/ 					delete installedCssChunks[chunkId];
+/******/ 					throw e;
+/******/ 				}));
+/******/ 			}
+/******/ 		};
+/******/ 		
+/******/ 		// no hmr
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/jsonp chunk loading */
+/******/ 	!function() {
+/******/ 		// no baseURI
+/******/ 		
+/******/ 		// object to store loaded and loading chunks
+/******/ 		// undefined = chunk not loaded, null = chunk preloaded/prefetched
+/******/ 		// [resolve, reject, Promise] = chunk loading, 0 = chunk loaded
+/******/ 		var installedChunks = {
+/******/ 			2143: 0
+/******/ 		};
+/******/ 		
+/******/ 		__webpack_require__.f.j = function(chunkId, promises) {
+/******/ 				// JSONP chunk loading for javascript
+/******/ 				var installedChunkData = __webpack_require__.o(installedChunks, chunkId) ? installedChunks[chunkId] : undefined;
+/******/ 				if(installedChunkData !== 0) { // 0 means "already installed".
+/******/ 		
+/******/ 					// a Promise means "currently loading".
+/******/ 					if(installedChunkData) {
+/******/ 						promises.push(installedChunkData[2]);
+/******/ 					} else {
+/******/ 						if(6848 != chunkId) {
+/******/ 							// setup Promise in chunk cache
+/******/ 							var promise = new Promise(function(resolve, reject) { installedChunkData = installedChunks[chunkId] = [resolve, reject]; });
+/******/ 							promises.push(installedChunkData[2] = promise);
+/******/ 		
+/******/ 							// start chunk loading
+/******/ 							var url = __webpack_require__.p + __webpack_require__.u(chunkId);
+/******/ 							// create error before stack unwound to get useful stacktrace later
+/******/ 							var error = new Error();
+/******/ 							var loadingEnded = function(event) {
+/******/ 								if(__webpack_require__.o(installedChunks, chunkId)) {
+/******/ 									installedChunkData = installedChunks[chunkId];
+/******/ 									if(installedChunkData !== 0) installedChunks[chunkId] = undefined;
+/******/ 									if(installedChunkData) {
+/******/ 										var errorType = event && (event.type === 'load' ? 'missing' : event.type);
+/******/ 										var realSrc = event && event.target && event.target.src;
+/******/ 										error.message = 'Loading chunk ' + chunkId + ' failed.\n(' + errorType + ': ' + realSrc + ')';
+/******/ 										error.name = 'ChunkLoadError';
+/******/ 										error.type = errorType;
+/******/ 										error.request = realSrc;
+/******/ 										installedChunkData[1](error);
+/******/ 									}
+/******/ 								}
+/******/ 							};
+/******/ 							__webpack_require__.l(url, loadingEnded, "chunk-" + chunkId, chunkId);
+/******/ 						} else installedChunks[chunkId] = 0;
+/******/ 					}
+/******/ 				}
+/******/ 		};
+/******/ 		
+/******/ 		// no prefetching
+/******/ 		
+/******/ 		// no preloaded
+/******/ 		
+/******/ 		// no HMR
+/******/ 		
+/******/ 		// no HMR manifest
+/******/ 		
+/******/ 		// no on chunks loaded
+/******/ 		
+/******/ 		// install a JSONP callback for chunk loading
+/******/ 		var webpackJsonpCallback = function(parentChunkLoadingFunction, data) {
+/******/ 			var chunkIds = data[0];
+/******/ 			var moreModules = data[1];
+/******/ 			var runtime = data[2];
+/******/ 			// add "moreModules" to the modules object,
+/******/ 			// then flag all "chunkIds" as loaded and fire callback
+/******/ 			var moduleId, chunkId, i = 0;
+/******/ 			if(chunkIds.some(function(id) { return installedChunks[id] !== 0; })) {
+/******/ 				for(moduleId in moreModules) {
+/******/ 					if(__webpack_require__.o(moreModules, moduleId)) {
+/******/ 						__webpack_require__.m[moduleId] = moreModules[moduleId];
+/******/ 					}
+/******/ 				}
+/******/ 				if(runtime) var result = runtime(__webpack_require__);
+/******/ 			}
+/******/ 			if(parentChunkLoadingFunction) parentChunkLoadingFunction(data);
+/******/ 			for(;i < chunkIds.length; i++) {
+/******/ 				chunkId = chunkIds[i];
+/******/ 				if(__webpack_require__.o(installedChunks, chunkId) && installedChunks[chunkId]) {
+/******/ 					installedChunks[chunkId][0]();
+/******/ 				}
+/******/ 				installedChunks[chunkId] = 0;
+/******/ 			}
+/******/ 		
+/******/ 		}
+/******/ 		
+/******/ 		var chunkLoadingGlobal = self["webpackChunkbrightermonday"] = self["webpackChunkbrightermonday"] || [];
+/******/ 		chunkLoadingGlobal.forEach(webpackJsonpCallback.bind(null, 0));
+/******/ 		chunkLoadingGlobal.push = webpackJsonpCallback.bind(null, chunkLoadingGlobal.push.bind(chunkLoadingGlobal));
+/******/ 	}();
+/******/ 	
+/******/ 	/* webpack/runtime/nonce */
+/******/ 	!function() {
+/******/ 		__webpack_require__.nc = undefined;
+/******/ 	}();
+/******/ 	
+/************************************************************************/
+var __webpack_exports__ = {};
+// This entry need to be wrapped in an IIFE because it need to be in strict mode.
+!function() {
+"use strict";
+
+// EXTERNAL MODULE: ./node_modules/page/page.js
+var page = __webpack_require__(55161);
+var page_default = /*#__PURE__*/__webpack_require__.n(page);
+;// CONCATENATED MODULE: ./resources/assets/scripts/module/util/bind-routes.js
+/* harmony default export */ var bind_routes = ((routeFunction, routeObject) => {
+  Object.keys(routeObject).forEach(url => {
+    const handler = routeObject[url];
+    routeFunction(url, handler);
+  });
+  return routeFunction;
+});
+;// CONCATENATED MODULE: ./resources/assets/scripts/app.js
+
+
+const route = (url, routeHandler) => {
+  page_default()(url, (ctx, next) => {
+    routeHandler()
+    .then(execute => {
+      if (execute.default) {
+        return execute.default();
+      }
+      if (typeof execute === "function") {
+        return execute();
+      }
+    }).catch(err => {
+      console.log(err);
+    });
+    next();
+  });
+};
+const routeConfig = {
+  "*": () => Promise.all(/* import() */[__webpack_require__.e(2727), __webpack_require__.e(7134)]).then(__webpack_require__.bind(__webpack_require__, 37134)),
+  "*/sign-up": () => __webpack_require__.e(/* import() */ 3205).then(__webpack_require__.bind(__webpack_require__, 73205)),
+  "/": () => __webpack_require__.e(/* import() */ 560).then(__webpack_require__.bind(__webpack_require__, 30560)),
+  "/account/checkout": () => __webpack_require__.e(/* import() */ 7220).then(__webpack_require__.bind(__webpack_require__, 57220)),
+  "/account/customer/self-assessment": () => __webpack_require__.e(/* import() */ 4842).then(__webpack_require__.bind(__webpack_require__, 74842)),
+  "/account/customer/*": () => window.location.pathname !== "/account/customer/sign-up" ? __webpack_require__.e(/* import() */ 4365).then(__webpack_require__.bind(__webpack_require__, 34365)) : Promise.resolve(""),
+  "/account/invitation/*": () => __webpack_require__.e(/* import() */ 4842).then(__webpack_require__.bind(__webpack_require__, 74842)),
+  "/account/customer/job-seeker/edit": () => __webpack_require__.e(/* import() */ 4577).then(__webpack_require__.bind(__webpack_require__, 74577)),
+  "/account/customer/job-seeker/employment-availability": () => __webpack_require__.e(/* import() */ 4577).then(__webpack_require__.bind(__webpack_require__, 74577)),
+  "/account/customer/sign-up": () => __webpack_require__.e(/* import() */ 1130).then(__webpack_require__.bind(__webpack_require__, 90712)),
+  "/account/password/reset/*": () => __webpack_require__.e(/* import() */ 134).then(__webpack_require__.bind(__webpack_require__, 30134)),
+  "/account/login": () => __webpack_require__.e(/* import() */ 3772).then(__webpack_require__.bind(__webpack_require__, 63772)),
+  "/account/employer/products": () => __webpack_require__.e(/* import() */ 1130).then(__webpack_require__.bind(__webpack_require__, 5866)),
+  "/account/employer/profile": () => __webpack_require__.e(/* import() */ 1268).then(__webpack_require__.bind(__webpack_require__, 51268)),
+  "/account/employer/sign-up": () => __webpack_require__.e(/* import() */ 1130).then(__webpack_require__.bind(__webpack_require__, 63075)),
+  "/account/employer/sign-up/company": () => __webpack_require__.e(/* import() */ 1130).then(__webpack_require__.bind(__webpack_require__, 63075)),
+  "/account/employer/jobs/create": () => __webpack_require__.e(/* import() */ 6402).then(__webpack_require__.bind(__webpack_require__, 56402)),
+  "/account/employer/jobs/:jobId/edit": () => __webpack_require__.e(/* import() */ 6402).then(__webpack_require__.bind(__webpack_require__, 56402)),
+  "/account/employer/jobs/copy/:jobId": () => __webpack_require__.e(/* import() */ 6402).then(__webpack_require__.bind(__webpack_require__, 56402)),
+  "/account/employer/jobs/assessment-catalogue*": () => __webpack_require__.e(/* import() */ 6402).then(__webpack_require__.bind(__webpack_require__, 56402)),
+  "/account/assessments-catalogue": () => __webpack_require__.e(/* import() */ 6402).then(__webpack_require__.bind(__webpack_require__, 56402)),
+  "/about": () => __webpack_require__.e(/* import() */ 6818).then(__webpack_require__.bind(__webpack_require__, 16818)),
+  "/company/*": () => __webpack_require__.e(/* import() */ 1323).then(__webpack_require__.bind(__webpack_require__, 41323)),
+  "/employer": () => __webpack_require__.e(/* import() */ 1130).then(__webpack_require__.bind(__webpack_require__, 5866)),
+  "/employer/call-requests": () => __webpack_require__.e(/* import() */ 26).then(__webpack_require__.bind(__webpack_require__, 80026)),
+  "/group/*": () => __webpack_require__.e(/* import() */ 369).then(__webpack_require__.bind(__webpack_require__, 25319)),
+  "/jobs*": () => __webpack_require__.e(/* import() */ 369).then(__webpack_require__.bind(__webpack_require__, 25319)),
+  "/v2/jobs*": () => __webpack_require__.e(/* import() */ 369).then(__webpack_require__.bind(__webpack_require__, 25319)),
+  "/job-seeker": () => __webpack_require__.e(/* import() */ 7737).then(__webpack_require__.bind(__webpack_require__, 27737)),
+  "/listings/*": () => __webpack_require__.e(/* import() */ 369).then(__webpack_require__.bind(__webpack_require__, 97335)),
+  "/learning*": () => __webpack_require__.e(/* import() */ 5105).then(__webpack_require__.bind(__webpack_require__, 55105)),
+  "/styleguide/*": () => __webpack_require__.e(/* import() */ 8497).then(__webpack_require__.bind(__webpack_require__, 58497)),
+  "/softskills/register/*": () => __webpack_require__.e(/* import() */ 9312).then(__webpack_require__.bind(__webpack_require__, 9312)),
+  "/softskills/registration/*": () => __webpack_require__.e(/* import() */ 9312).then(__webpack_require__.bind(__webpack_require__, 9312)),
+  "/softskills/welcome": () => __webpack_require__.e(/* import() */ 9312).then(__webpack_require__.bind(__webpack_require__, 9312)),
+  "/telenor/*": () => __webpack_require__.e(/* import() */ 5902).then(__webpack_require__.bind(__webpack_require__, 95902)),
+  "/prudential": () => __webpack_require__.e(/* import() */ 3535).then(__webpack_require__.bind(__webpack_require__, 43535)),
+  "/widgets": () => __webpack_require__.e(/* import() */ 8517).then(__webpack_require__.bind(__webpack_require__, 48517)),
+  "/account/cv-services": () => __webpack_require__.e(/* import() */ 5836).then(__webpack_require__.bind(__webpack_require__, 25836)),
+  "/account/cv-services/*": () => __webpack_require__.e(/* import() */ 5836).then(__webpack_require__.bind(__webpack_require__, 25836)),
+  "/account/customer/cv-services/*": () => __webpack_require__.e(/* import() */ 5836).then(__webpack_require__.bind(__webpack_require__, 25836)),
+  "/employer/best-match": () => __webpack_require__.e(/* import() */ 1115).then(__webpack_require__.bind(__webpack_require__, 71115)),
+  "/employer/skills-assessments": () => __webpack_require__.e(/* import() */ 1115).then(__webpack_require__.bind(__webpack_require__, 71115)),
+  "/account/employer/best-match": () => __webpack_require__.e(/* import() */ 1115).then(__webpack_require__.bind(__webpack_require__, 71115)),
+  "/account/employer/skills-assessments": () => __webpack_require__.e(/* import() */ 1115).then(__webpack_require__.bind(__webpack_require__, 71115))
+};
+const maybeLocale = window.location.pathname.split("/")[1] || "";
+if (["my"].indexOf(maybeLocale) > -1) {
+  const mmSpecific = {
+    "/about": "/akyoung",
+    "/companies": "/konepany-sayinn",
+    "/customer": "/phok-tel",
+    "/customer/sign-up": "/phok-tel/matpone-tinyan",
+    "/employer": "/alokeshin",
+    "/employer/sign-up": "/alokeshin/matpone-tinyan",
+    "/job-seeker": "/aloke-shar-thu",
+    "/jobs*": "/alokemyar*",
+    "/listings/*": "/alokepostmyar/*",
+    "/login": "/winyan",
+    "/privacy": "/lonechone-yay",
+    "/sign-up": "/matpone-tinyan",
+    "/terms": "/sikan-chat",
+    "/widgets": "/wigit",
+    "*/sign-up": "*/matpone-tinyan"
+  };
+  const mmGet = path => mmSpecific[path] || path;
+  Object.keys(routeConfig).forEach(key => {
+    if (key !== "*") {
+      routeConfig[`/${maybeLocale}${mmGet(key)}`] = routeConfig[key];
+    }
+  });
+}
+bind_routes(route, routeConfig);
+page_default().strict(false);
+page_default().start({
+  click: false
+});
+}();
+/******/ })()
+;

@@ -1,0 +1,172 @@
+/* Sign Up */
+.SignUp {
+  display: flex;
+  justify-content: center;
+  background-image: "url(/signup.webp)";
+  background-size: contain;
+  padding: 20px;
+  background: azure;
+  color: #157b7b;
+  box-shadow: 2px 3px bisque;
+  font-family: "Times New Roman", Times, serif;
+  height: 100%;
+}
+
+.signupHeader {
+}
+
+.form input {
+  outline-color: rgb(1, 33, 33);
+  margin-bottom: 15px;
+  color: rgb(14, 56, 43);
+  border: 2px solid aquamarine;
+}
+.form input::placeholder {
+  color: rgb(25, 96, 96);
+}
+.form input:focus {
+  outline: none;
+}
+
+.form button:hover {
+  background-color: #319e9e;
+}
+
+/* Login */
+.login {
+  background-image: "url(/signup.webp)";
+  background-size: cover;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #157b7b;
+  box-shadow: 2px 3px bisque;
+  font-family: "Times New Roman", Times, serif;
+  height: 100vh;
+}
+
+/* NavBar */
+.navBar {
+  background: rgb(26, 134, 98);
+  box-shadow: 0px 1px black;
+}
+.marginNav {
+  margin-bottom: 100px;
+}
+.navList {
+  width: 40%;
+  justify-content: space-around;
+  align-items: center;
+  font-size: 18px;
+}
+
+.navList .navLink {
+  text-decoration: none;
+  color: aliceblue;
+}
+.navList .navLink:hover {
+  border-bottom: 2px solid black;
+  transition: all 2s;
+}
+
+.menu {
+  display: none;
+}
+
+/* Search Input */
+.search {
+  display: flex;
+  justify-content: center;
+  margin-top: 100px;
+}
+
+.searchInput {
+  outline-color: rgb(1, 33, 33);
+  margin-bottom: 15px;
+  color: rgb(14, 56, 43);
+  border: 2px solid rgb(15, 163, 113);
+  margin-right: 20px;
+}
+
+@media screen and (max-width: 480px) {
+  .menu {
+    display: block;
+    font-size: 20px;
+  }
+  .menuOpen {
+    font-size: 30px;
+    margin: 15px;
+    color: #fff;
+  }
+
+  .navLink {
+    display: none;
+  }
+  .dropDown {
+    position: absolute;
+    left: 0;
+    top: 0;
+    background: black;
+    color: #fff;
+    width: 100%;
+    height: 100vh;
+    animation: growDown 300ms ease-in-out;
+  }
+
+  @keyframes growDown {
+    0% {
+      transform: scaleY(0);
+    }
+    80% {
+      transform: scaleY(1.1);
+    }
+    100% {
+      transform: scaleY(1);
+    }
+  }
+
+  .dropDown li {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: #fff;
+    font-size: 30px;
+  }
+
+  .dropDown .link {
+    text-decoration: none;
+    margin-bottom: 30px;
+    color: #fff;
+  }
+
+  .dropDown .link:hover {
+    animation: all 2s ease-in-out;
+    font-size: 32px;
+    color: blanchedalmond;
+  }
+
+  .footer .link {
+    text-decoration: none;
+    color: #319e9e;
+    padding: 8px;
+  }
+}
+
+/* Home */
+.home {
+  display: flex;
+  justify-content: center;
+  
+}
+
+/* Footer */
+.footer .link {
+  text-decoration: none;
+  color: #319e9e;
+  padding: 20px 5px;
+}
+
+.footer .link:hover {
+  font-weight: 600;
+  color: #157b7b;
+}
